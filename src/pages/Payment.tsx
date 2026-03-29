@@ -6,6 +6,7 @@ import { initiateRazorpayPayment, loadRazorpayScript, RazorpayResponse } from "@
 import { toast } from "@/hooks/use-toast";
 import { decrementMultipleStock } from "@/lib/inventoryService";
 import { MedicineWithPrice } from "@/lib/medicineData";
+import { sendDispenseCommand } from "@/lib/dispenserService";
 
 export default function Payment() {
   const location = useLocation();
@@ -53,17 +54,36 @@ export default function Payment() {
             qty: item.qty,
           }));
           decrementMultipleStock(stockItems);
-          
-          // Show dispensing first
+
+          // Store payment ID and show dispensing UI
           setPaymentId(response.razorpay_payment_id);
           setIsProcessing(false);
           setIsDispensing(true);
-          
-          // After 3 seconds, show thank you
-          setTimeout(() => {
-            setIsDispensing(false);
-            setIsComplete(true);
-          }, 3000);
+
+          // Send dispense command to ESP32 hardware
+          sendDispenseCommand(response.razorpay_payment_id, items)
+            .then((result) => {
+              if (result.success) {
+                console.log("[Payment] ESP32 dispense successful:", result.dispensedCount, "tablets");
+              } else {
+                console.warn("[Payment] ESP32 dispense warning:", result.error);
+                toast({
+                  title: "Hardware Notice",
+                  description: result.error || "Dispenser communication issue",
+                  variant: "destructive",
+                });
+              }
+            })
+            .catch((err) => {
+              console.error("[Payment] ESP32 dispense error:", err);
+            })
+            .finally(() => {
+              // After dispensing completes (or fails), show thank you
+              setTimeout(() => {
+                setIsDispensing(false);
+                setIsComplete(true);
+              }, 1000);
+            });
         },
         () => {
           // Payment dismissed/failed
